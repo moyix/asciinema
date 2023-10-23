@@ -1,8 +1,8 @@
 import os
 import sys
 import time
+import tempfile
 from typing import Any, Callable, Dict, List, Optional, TextIO, Tuple, Type
-
 from . import pty_ as pty  # avoid collisions with standard library `pty`
 from .asciicast import v2
 from .asciicast.v2 import writer as w2
@@ -35,6 +35,11 @@ def record(  # pylint: disable=too-many-arguments,too-many-locals
         key_bindings = {}
 
     command_env["ASCIINEMA_REC"] = "1"
+
+    # Get a temporary filename to use for the control fifo
+    control_sock = tempfile.NamedTemporaryFile(
+        prefix='asciinema_ctl_',suffix='.sock').name
+    command_env["ASCIINEMA_CTL"] = control_sock
 
     if capture_env is None:
         capture_env = ["SHELL", "TERM"]
@@ -69,6 +74,7 @@ def record(  # pylint: disable=too-many-arguments,too-many-locals
                 key_bindings,
                 tty_stdin_fd=tty_stdin_fd,
                 tty_stdout_fd=tty_stdout_fd,
+                control_sock=control_sock,
             )
 
 

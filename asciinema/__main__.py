@@ -10,6 +10,7 @@ from .commands.cat import CatCommand
 from .commands.play import PlayCommand
 from .commands.record import RecordCommand
 from .commands.upload import UploadCommand
+from .commands.control import ControlCommand
 
 
 def valid_encoding() -> bool:
@@ -245,6 +246,23 @@ For help on a specific command run:
         "auth", help="Manage recordings on asciinema.org account"
     )
     parser_auth.set_defaults(cmd=AuthCommand)
+
+    # create the parser for the `control` command
+    parser_control = subparsers.add_parser(
+        "control", help="Control an in-progress asciinema recording"
+    )
+    parser_control.add_argument(
+        "command", choices=['pause', 'resume', 'mark', 'status'],
+        help="command to issue"
+    )
+    parser_control.add_argument(
+        "-q",
+        "--quiet",
+        help="be quiet, suppress all notices/warnings",
+        action="store_true",
+        default=False,
+    )
+    parser_control.set_defaults(cmd=ControlCommand)
 
     # parse the args and call whatever function was selected
     args = parser.parse_args()

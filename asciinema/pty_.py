@@ -7,6 +7,7 @@ import signal
 import struct
 import termios
 import time
+import socket
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .tty_ import raw
@@ -31,6 +32,7 @@ def record(
     key_bindings: Dict[str, Any],
     tty_stdin_fd: int = pty.STDIN_FILENO,
     tty_stdout_fd: int = pty.STDOUT_FILENO,
+    control_sock: Optional[str] = None,
 ) -> None:
     pty_fd: Any = None
     start_time: Optional[float] = None
@@ -40,6 +42,7 @@ def record(
     pause_key = key_bindings.get("pause")
     add_marker_key = key_bindings.get("add_marker")
     input_data = bytes()
+    control_connections = []
 
     def handle_resize() -> None:
         size = get_tty_size()
@@ -61,6 +64,44 @@ def record(
         if not pause_time:
             assert start_time is not None
             writer.write_stdout(time.perf_counter() - start_time, data)
+
+    def handle_control_read(conn : socket.socket, data: Any) -> None:
+        nonlocal pause_time
+        nonlocal start_time
+        # Pause
+        if data == b'p':
+            if pause_time:
+                conn.sendall(b'ERR Already paused\n')
+            else:
+                pause_time = time.perf_counter()
+                conn.sendall(b'OK\n')
+                notify("Paused recording")
+        # Resume
+        elif data == b'r':
+            if pause_time:
+                start_time += time.perf_counter() - pause_time
+                pause_time = None
+                conn.sendall(b'OK\n')
+                notify("Resumed recording")
+            else:
+                conn.sendall(b'ERR Not paused\n')
+        # Marker
+        elif data == b'm':
+            if start_time is None:
+                conn.sendall(b'ERR Not started\n')
+            writer.write_marker(time.perf_counter() - start_time)
+            conn.sendall(b'OK\n')
+            notify("Marker added")
+        # Status
+        elif data == b's':
+            if pause_time:
+                conn.sendall(b'PAUSED\n')
+            elif start_time is None:
+                conn.sendall(b'NOT_STARTED\n')
+            else:
+                conn.sendall(b'RECORDING\n')
+        else:
+            conn.sendall(b'ERR Unknown command\n')
 
     def handle_stdin_read(data: Any) -> None:
         nonlocal input_data
@@ -106,10 +147,10 @@ def record(
             assert start_time is not None
             writer.write_stdin(time.perf_counter() - start_time, data)
 
-    def copy(signal_fd: int) -> None:  # pylint: disable=too-many-branches
+    def copy(signal_fd: int, control_fd: int) -> None:  # pylint: disable=too-many-branches
         nonlocal input_data
 
-        crfds = [pty_fd, tty_stdin_fd, signal_fd]
+        crfds = [pty_fd, tty_stdin_fd, signal_fd, control_fd]
 
         while True:
             if len(input_data) > 0:
@@ -157,6 +198,30 @@ def record(
                         if sig == signal.SIGWINCH:
                             handle_resize()
 
+            if control_fd in rfds:
+                # accept new connections
+                try:
+                    conn, _ = control_fd.accept()
+                    open('/tmp/reclog.txt', 'a').write('new connection\n')
+                    conn.setblocking(False)
+                    control_connections.append(conn)
+                    crfds.append(conn)
+                    open('/tmp/reclog.txt', 'a').write(str(control_connections) + '\n')
+                except BlockingIOError:
+                    pass
+
+            for conn in control_connections:
+                if conn in rfds:
+                    open('/tmp/reclog.txt', 'a').write('data to read on ' + str(conn) + '\n')
+                    data = os.read(conn.fileno(), READ_LEN)
+
+                    if data:
+                        handle_control_read(conn, data)
+                    else:
+                        control_connections.remove(conn)
+                        crfds.remove(conn)
+                        conn.close()
+
             if pty_fd in wfds:
                 try:
                     n = os.write(pty_fd, input_data)
@@ -176,10 +241,11 @@ def record(
     start_time = time.perf_counter()
     set_pty_size(get_tty_size())
 
-    with SignalFD(EXIT_SIGNALS + [signal.SIGWINCH]) as sig_fd:
+    with SignalFD(EXIT_SIGNALS + [signal.SIGWINCH]) as sig_fd, \
+         ControlFD(control_sock) as ctl_fd:
         with raw(tty_stdin_fd):
             try:
-                copy(sig_fd)
+                copy(sig_fd, ctl_fd)
                 os.close(pty_fd)
             except (IOError, OSError):
                 pass
@@ -216,3 +282,20 @@ class SignalFD:
         signals: List[signal.Signals],
     ) -> List[Tuple[signal.Signals, Any]]:
         return list(map(lambda s: (s, lambda signal, frame: None), signals))
+
+class ControlFD:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.fd: Optional[int] = None
+
+    def __enter__(self) -> int:
+        self.fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.fd.bind(self.path)
+        self.fd.setblocking(False)
+        self.fd.listen(1)
+        return self.fd
+
+    def __exit__(self, type_: str, value: str, traceback: str) -> None:
+        if self.fd is not None:
+            self.fd.close()
+            os.remove(self.path)
