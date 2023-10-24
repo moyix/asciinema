@@ -43,6 +43,7 @@ def record(
     add_marker_key = key_bindings.get("add_marker")
     input_data = bytes()
     control_connections = []
+    term_flags = None
 
     def handle_resize() -> None:
         size = get_tty_size()
@@ -147,12 +148,22 @@ def record(
             assert start_time is not None
             writer.write_stdin(time.perf_counter() - start_time, data)
 
+    def handle_flags_change(new_flags: Any) -> None:
+        assert start_time is not None
+        writer.write_flags(time.perf_counter() - start_time, new_flags)
+
     def copy(signal_fd: int, control_fd: int) -> None:  # pylint: disable=too-many-branches
         nonlocal input_data
+        nonlocal term_flags
 
         crfds = [pty_fd, tty_stdin_fd, signal_fd, control_fd]
 
         while True:
+            new_flags = termios.tcgetattr(pty_fd)
+            if term_flags != new_flags:
+                term_flags = new_flags
+                handle_flags_change(new_flags)
+
             if len(input_data) > 0:
                 cwfds = [pty_fd]
             else:

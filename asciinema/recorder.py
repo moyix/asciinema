@@ -143,6 +143,9 @@ class async_writer(async_worker):
     def write_resize(self, ts: float, size: Tuple[int, int]) -> None:
         self.enqueue([ts, "r", size])
 
+    def write_flags(self, ts: float, flags: Any) -> None:
+        self.enqueue([ts, "f", flags])
+
     def run(self) -> None:
         try:
             with self.writer as w:
@@ -159,6 +162,8 @@ class async_writer(async_worker):
                         w.write_marker(self.time_offset + ts)
                     elif etype == "r":
                         w.write_resize(self.time_offset + ts, data)
+                    elif etype == "f":
+                        w.write_flags(self.time_offset + ts, data)
         except IOError:
             for event in iter(self.queue.get, None):
                 pass

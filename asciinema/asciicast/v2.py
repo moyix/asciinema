@@ -157,6 +157,10 @@ class writer(file_writer):
         cols, rows = size
         self.__write_event(ts, "r", f"{cols}x{rows}")
 
+    def write_flags(self, ts: float, flags: Any) -> None:
+        self.__write_event(ts, "f",
+                           f"i:{flags[0]},o:{flags[1]},c:{flags[2]},l:{flags[3]}")
+
     # pylint: disable=consider-using-with
     def _open_file(self) -> None:
         if self.path == "-":

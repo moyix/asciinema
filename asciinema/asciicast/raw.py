@@ -54,6 +54,9 @@ class writer(file_writer):
         cols, rows = size
         self._write(f"\x1b[8;{rows};{cols}t".encode("utf-8"))
 
+    def write_flags(self, ts: float, flags: Any) -> None:
+        pass
+
     # pylint: disable=consider-using-with
     def _open_file(self) -> None:
         if self.path == "-":
