@@ -202,17 +202,14 @@ def record(
                 # accept new connections
                 try:
                     conn, _ = control_fd.accept()
-                    open('/tmp/reclog.txt', 'a').write('new connection\n')
                     conn.setblocking(False)
                     control_connections.append(conn)
                     crfds.append(conn)
-                    open('/tmp/reclog.txt', 'a').write(str(control_connections) + '\n')
                 except BlockingIOError:
                     pass
 
             for conn in control_connections:
                 if conn in rfds:
-                    open('/tmp/reclog.txt', 'a').write('data to read on ' + str(conn) + '\n')
                     data = os.read(conn.fileno(), READ_LEN)
 
                     if data:
